@@ -1,0 +1,4 @@
+﻿node_modules
+store.json
+.env
+npm-debug.log*

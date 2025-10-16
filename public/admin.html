@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Admin • Affiliate Manager</title>
+<style>
+:root{--bg:#0e1624;--panel:#0b1220;--text:#eaf2ff;--muted:#a3b2c7;--blue:#3b82f6;--bronze:#b08d57;--ring:rgba(59,130,246,.45);--border:rgba(255,255,255,.09)}
+*{box-sizing:border-box} body{margin:0;background:linear-gradient(180deg,#0a1220 0%,#0e1624 100%);color:var(--text);font-family:system-ui,Segoe UI,Roboto,Arial}
+.wrap{max-width:1000px;margin:auto;padding:20px}
+h1{margin:8px 0 16px} h2{margin:16px 0 10px} .muted{color:var(--muted)}
+.card{background:linear-gradient(180deg,var(--panel),#0a1424);border:1px solid var(--border);border-radius:16px;padding:16px;margin:14px 0}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+input,button{padding:10px;border-radius:10px;border:1px solid var(--border);background:#0a1424;color:var(--text);outline:none}
+input:focus{box-shadow:0 0 0 3px var(--ring);border-color:transparent}
+button{cursor:pointer;font-weight:700;color:#0b1220;background:linear-gradient(135deg,var(--bronze),var(--blue))}
+table{width:100%;border-collapse:collapse;margin-top:8px}
+th,td{border-bottom:1px solid var(--border);padding:8px;text-align:left;vertical-align:middle}
+.code{font-family:ui-monospace,Consolas,monospace;background:#0a1424;border:1px solid var(--border);padding:2px 6px;border-radius:8px}
+.badge{padding:2px 8px;border-radius:999px;background:#0a1424;border:1px solid var(--border);font-size:12px}
+.copy{margin-left:6px;padding:6px 10px}
+.ok{color:#86efac} .err{color:#fca5a5}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Admin Dashboard <span class="badge" id="me">checking…</span></h1>
+
+  <!-- Create Affiliate -->
+  <div class="card">
+    <h2>Create Affiliate</h2>
+    <div class="row">
+      <input id="affName" placeholder="Name (e.g., Alice)" />
+      <input id="affRate" type="number" min="0" max="10000" value="1000" title="bps (1000 = 10%)"/>
+      <button id="btnCreateAff">Create</button>
+    </div>
+    <div id="createOut" class="muted" style="margin-top:8px"></div>
+  </div>
+
+  <!-- Affiliates list + Reset PIN -->
+  <div class="card">
+    <h2>Affiliates</h2>
+    <table id="affTbl">
+      <thead><tr>
+        <th>Name</th><th>Code</th><th>Rate</th><th>Clicks</th><th>Conv</th><th>Earned ₹</th><th>Available ₹</th><th>Actions</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <!-- Merchants & Coupons (quick manage) -->
+  <div class="card">
+    <h2>Merchants</h2>
+    <div class="row">
+      <input id="mId" placeholder="merchant id (e.g., m1)"/>
+      <input id="mName" placeholder="Merchant name"/>
+      <input id="mUrl" placeholder="Checkout URL (e.g., http://localhost:3000/checkout.html)"/>
+      <input id="mParam" placeholder="Coupon param (e.g., coupon)" value="coupon"/>
+      <button id="btnCreateMerchant">Create merchant</button>
+    </div>
+    <div class="muted" id="mMsg" style="margin-top:6px"></div>
+
+    <h2 style="margin-top:18px">Map Coupon → Affiliate</h2>
+    <div class="row">
+      <input id="cMerchant" placeholder="merchant id (e.g., m1)"/>
+      <input id="cAff" placeholder="affiliate code"/>
+      <input id="cCode" placeholder="coupon (e.g., SAVE10)"/>
+      <button id="btnMap">Map</button>
+    </div>
+    <div class="muted" id="cMsg" style="margin-top:6px"></div>
+  </div>
+
+  <!-- Payouts -->
+  <div class="card">
+    <h2>Payout Requests</h2>
+    <table id="payoutTbl">
+      <thead><tr><th>ID</th><th>Code</th><th>Amount ₹</th><th>Status</th><th>When</th><th>Actions</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Exports</h2>
+    <div class="row">
+      <a href="/api/admin/export/conversions.csv" target="_blank"><button>Conversions CSV</button></a>
+      <a href="/api/admin/export/payouts.csv" target="_blank"><button>Payouts CSV</button></a>
+    </div>
+  </div>
+</div>
+
+<script>
+async function j(u,o){const r=await fetch(u,{headers:{'Content-Type':'application/json'},credentials:'include',...o}); if(!r.ok) throw new Error(await r.text()); return r.json();}
+const fmtRs = v => Number(v).toFixed(2);
+
+async function loadMe(){
+  try { const m = await j('/api/me'); document.getElementById('me').textContent = m.user ? `logged in as ${m.user}` : 'not logged in'; }
+  catch{ document.getElementById('me').textContent = 'not logged in'; location.href='/login.html'; }
+}
+
+async function loadAffiliates(){
+  const rows = await (await fetch('/api/stats',{credentials:'include'})).json();
+  const tb = document.querySelector('#affTbl tbody'); tb.innerHTML='';
+  rows.forEach(r=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML = `
+      <td>${r.name}</td>
+      <td><span class="code">${r.code}</span></td>
+      <td>${(r.rateBps/100).toFixed(2)}%</td>
+      <td>${r.clicks}</td>
+      <td>${r.conversions}</td>
+      <td>${r.earned}</td>
+      <td><b>${r.available}</b></td>
+      <td>
+        <button data-code="${r.code}" class="pin">Reset PIN</button>
+        <a href="${r.shareLink}" target="_blank"><button class="copy">Link</button></a>
+      </td>`;
+    tb.appendChild(tr);
+  });
+  // Attach reset handlers
+  document.querySelectorAll('button.pin').forEach(btn=>{
+    btn.onclick = async () => {
+      const code = btn.getAttribute('data-code');
+      if(!confirm(`Reset PIN for ${code}?`)) return;
+      try{
+        const res = await j(`/api/admin/affiliates/${encodeURIComponent(code)}/reset-pin`, { method:'POST' });
+        alert(`New PIN for ${code}: ${res.newPin}\n(Share this with the affiliate securely)`);
+      }catch(e){ alert('Error: ' + e.message); }
+    };
+  });
+}
+
+async function loadPayouts(){
+  try{
+    const ps = await j('/api/admin/payouts');
+    const tb = document.querySelector('#payoutTbl tbody'); tb.innerHTML='';
+    ps.forEach(p=>{
+      const tr=document.createElement('tr');
+      tr.innerHTML = `
+        <td>${p.id}</td><td><span class="code">${p.code}</span></td>
+        <td>${fmtRs(p.amount_cents/100)}</td><td>${p.status}</td><td>${p.ts}</td>
+        <td>
+          <button data-id="${p.id}" class="appr">Approve</button>
+          <button data-id="${p.id}" class="pay">Mark paid</button>
+        </td>`;
+      tb.appendChild(tr);
+    });
+    document.querySelectorAll('button.appr').forEach(b=>{
+      b.onclick = async ()=>{ try{ await j(`/api/admin/payouts/${b.dataset.id}/approve`,{method:'POST'}); await loadPayouts(); await loadAffiliates(); }catch(e){alert(e.message);} };
+    });
+    document.querySelectorAll('button.pay').forEach(b=>{
+      b.onclick = async ()=>{ try{ await j(`/api/admin/payouts/${b.dataset.id}/mark-paid`,{method:'POST'}); await loadPayouts(); await loadAffiliates(); }catch(e){alert(e.message);} };
+    });
+  }catch(e){ /* not admin or none yet */ }
+}
+
+// Create affiliate (shows PIN returned once)
+document.getElementById('btnCreateAff').onclick = async () => {
+  const name = document.getElementById('affName').value.trim();
+  const rateBps = Number(document.getElementById('affRate').value || 1000);
+  const out = document.getElementById('createOut');
+  out.textContent='';
+  try{
+    const a = await j('/api/affiliates',{method:'POST',body:JSON.stringify({name,rateBps})});
+    out.innerHTML = `
+      <div class="ok">Created <b>${a.name}</b></div>
+      <div>Code: <span class="code">${a.code}</span></div>
+      <div>PIN: <span class="code" id="newPin">${a.pin}</span> <button class="copy" onclick="navigator.clipboard.writeText('${a.pin}')">Copy PIN</button></div>
+      <div>Share: <a href="${a.link}" target="_blank">${a.link}</a></div>
+      <div>Portal: <a href="${a.portal}" target="_blank">${a.portal}</a></div>`;
+    document.getElementById('affName').value=''; loadAffiliates();
+  }catch(e){ out.innerHTML = `<span class="err">${e.message}</span>`; }
+};
+
+// Create merchant
+document.getElementById('btnCreateMerchant').onclick = async ()=>{
+  const body = {
+    id: document.getElementById('mId').value.trim(),
+    name: document.getElementById('mName').value.trim(),
+    checkout_url: document.getElementById('mUrl').value.trim(),
+    coupon_param: document.getElementById('mParam').value.trim()
+  };
+  const msg = document.getElementById('mMsg'); msg.textContent='';
+  try{ await j('/api/merchants',{method:'POST',body:JSON.stringify(body)}); msg.textContent='Merchant created.'; }
+  catch(e){ msg.textContent='Error: '+e.message; }
+};
+
+// Map coupon
+document.getElementById('btnMap').onclick = async ()=>{
+  const body = {
+    merchantId: document.getElementById('cMerchant').value.trim(),
+    affiliateCode: document.getElementById('cAff').value.trim(),
+    coupon: document.getElementById('cCode').value.trim()
+  };
+  const msg = document.getElementById('cMsg'); msg.textContent='';
+  try{ await j('/api/coupons',{method:'POST',body:JSON.stringify(body)}); msg.textContent='Mapped.'; }
+  catch(e){ msg.textContent='Error: '+e.message; }
+};
+
+(async function init(){
+  await loadMe();
+  await loadAffiliates();
+  await loadPayouts();
+})();
+</script>
+</body>
+</html>
+

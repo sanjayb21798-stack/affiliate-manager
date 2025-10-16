@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Demo Checkout</title>
+  <style>
+    :root{--bg:#0f172a;--panel:#0b1b2e;--text:#e5e7eb;--muted:#9ca3af;--border:rgba(255,255,255,.08)}
+    *{box-sizing:border-box}
+    body{margin:0;padding:24px;background:#0f172a;color:#e5e7eb;font-family:system-ui,Segoe UI,Roboto,Arial}
+    .card{max-width:720px;margin:auto;background:#0b1b2e;border:1px solid var(--border);border-radius:14px;padding:18px}
+    .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+    input,button{padding:10px;border-radius:10px;border:1px solid var(--border);background:#0a1529;color:#e5e7eb}
+    button{cursor:pointer}
+    table{width:100%;border-collapse:collapse;margin-top:8px}
+    th,td{border-bottom:1px solid var(--border);padding:8px;text-align:left}
+    .ok{color:#86efac}.err{color:#fca5a5}.muted{color:var(--muted)}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Demo Checkout</h2>
+    <p class="muted">This page simulates a hosted checkout. It reads <code>?coupon</code> and <code>?aff</code>, shows the price, and on “Complete Payment” calls your <code>/api/convert</code>.</p>
+
+    <div id="params" class="muted">Reading URL…</div>
+
+    <table>
+      <tr><th>Product</th><td>Course: “Zero → One”</td></tr>
+      <tr><th>List Price</th><td>₹ <span id="priceList">499.00</span></td></tr>
+      <tr><th>Coupon</th><td><span id="coupon">—</span></td></tr>
+      <tr><th>Discount</th><td>₹ <span id="discount">0.00</span></td></tr>
+      <tr><th><b>Payable</b></th><td><b>₹ <span id="payable">499.00</span></b></td></tr>
+    </table>
+
+    <div class="row" style="margin-top:12px">
+      <button id="pay">Complete Payment</button>
+      <button id="new">Try another affiliate</button>
+    </div>
+
+    <div id="msg" style="margin-top:10px"></div>
+  </div>
+
+  <script>
+    // Basic utilities
+    const qs = new URLSearchParams(location.search);
+    const fmt = n => (n/100).toFixed(2);
+
+    // Demo pricing
+    const PRICE_CENTS = 49900; // ₹499.00
+    let coupon = (qs.get('coupon') || '').trim();
+    let aff = (qs.get('aff') || '').trim();
+
+    // Demo discount rule: 10% off if any coupon is present
+    // (You can change this logic or make it match your coupon text)
+    const discountCents = coupon ? Math.round(PRICE_CENTS * 0.10) : 0;
+    const payableCents = Math.max(0, PRICE_CENTS - discountCents);
+
+    // Populate UI
+    document.getElementById('params').textContent = `coupon=${coupon || '—'}, aff=${aff || '—'}`;
+    document.getElementById('priceList').textContent = fmt(PRICE_CENTS);
+    document.getElementById('coupon').textContent = coupon || '—';
+    document.getElementById('discount').textContent = fmt(discountCents);
+    document.getElementById('payable').textContent = fmt(payableCents);
+
+    function newOrderId(){
+      const r = Math.random().toString(36).slice(2,8).toUpperCase();
+      return `ORD-${Date.now()}-${r}`;
+    }
+
+    document.getElementById('new').onclick = () => {
+      // wipe params so you can paste a new URL (or navigate back via /r/:code?m=m1)
+      location.href = '/checkout.html';
+    };
+
+    document.getElementById('pay').onclick = async () => {
+      const msg = document.getElementById('msg');
+      msg.textContent = '';
+      if (!aff) { msg.innerHTML = '<span class="err">Missing aff code in URL (?aff=)</span>'; return; }
+
+      const orderId = newOrderId();
+
+      // Call your conversion endpoint — this is the “success webhook”
+      try{
+        const res = await fetch('/api/convert', {
+          method: 'POST',
+          headers: { 'Content-Type':'application/json' },
+          body: JSON.stringify({
+            code: aff,               // affiliate code from URL
+            orderId: orderId,        // unique order id
+            amountCents: payableCents
+          })
+        });
+        if (!res.ok) {
+          const t = await res.text();
+          msg.innerHTML = `<span class="err">Conversion failed: ${t}</span>`;
+          return;
+        }
+        const data = await res.json();
+        msg.innerHTML = `<span class="ok">Payment success! Recorded conversion <code>${data.conversionId}</code> with commission ₹ ${(data.commissionCents/100).toFixed(2)}</span>`;
+      }catch(e){
+        msg.innerHTML = `<span class="err">Network error: ${e.message}</span>`;
+      }
+    };
+  </script>
+</body>
+</html>

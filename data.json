@@ -1,0 +1,44 @@
+{
+  "affiliates": [
+    {
+      "id": "Fy0qH4vIv6pQ70FoXQfXN",
+      "name": "dravneeshkhare",
+      "code": "a6Py0cEs",
+      "rate_bps": 1000,
+      "created_at": "2025-10-14T08:57:08.277Z"
+    },
+    {
+      "id": "zvnyibFBjiINEBzBOwZi8",
+      "name": "anirudh",
+      "code": "xB9hlzOk",
+      "rate_bps": 1000,
+      "created_at": "2025-10-14T10:14:43.844Z"
+    }
+  ],
+  "clicks": [
+    {
+      "id": "xFrJx7ujKzm8u-A5YEplC",
+      "code": "a6Py0cEs",
+      "ip": "::1",
+      "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
+      "ts": "2025-10-14T10:12:19.362Z"
+    },
+    {
+      "id": "KNtphqqmTB34ts6cVJnXL",
+      "code": "xB9hlzOk",
+      "ip": "::1",
+      "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
+      "ts": "2025-10-14T10:18:04.532Z"
+    },
+    {
+      "id": "x1zwsTe9mX9fUjdypDMD4",
+      "code": "a6Py0cEs",
+      "ip": "::1",
+      "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
+      "ts": "2025-10-14T10:32:05.124Z"
+    }
+  ],
+  "conversions": [],
+  "commissions": [],
+  "payouts": []
+}

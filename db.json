@@ -1,0 +1,141 @@
+{
+  "affiliates": [
+    {
+      "id": "Xnokezk-cxR_KOZEgNPsD",
+      "name": "Dravneesh Khare",
+      "code": "BAUEbAK5",
+      "rate_bps": 1000,
+      "pin": "394208",
+      "created_at": "2025-10-15T05:15:28.826Z"
+    },
+    {
+      "id": "ZShffADP148oxJykqJCat",
+      "name": "anirudh",
+      "code": "MGZkCkI2",
+      "rate_bps": 1000,
+      "pin": "304134",
+      "created_at": "2025-10-15T05:16:23.635Z"
+    },
+    {
+      "id": "tSDYsJnELWiX7KyK0ZmQs",
+      "name": "sanjay",
+      "code": "zLhzYLjk",
+      "rate_bps": 1000,
+      "pin_hash": "$2b$10$wDiZ55wMhEOcNN6wt7tqN..Bm.9gTvDNqWBjGuIMQe9GlYDSXfM5.",
+      "created_at": "2025-10-15T06:56:26.773Z"
+    },
+    {
+      "id": "eprsBzwVwyKsj5oKi6b0z",
+      "name": "Drtest",
+      "code": "gJBCQMYr",
+      "rate_bps": 1000,
+      "pin_hash": "$2b$10$mPIVRrQXaXDk.16LXl2SWOHOVsNWaBqFtobGpiqcjRLVchwg5FHIW",
+      "created_at": "2025-10-15T06:56:59.060Z"
+    },
+    {
+      "id": "KgXfqkbyuHcsF0g5e17bR",
+      "name": "Drtest2",
+      "code": "OgMlYokz",
+      "rate_bps": 1000,
+      "pin_hash": "$2b$10$f/Q.LN8i5ME7Ueq7bIFq8.j6Wjh1/c/QDlOaI3R.FIsURrN.X7CVi",
+      "created_at": "2025-10-15T09:46:18.913Z"
+    }
+  ],
+  "clicks": [
+    {
+      "id": "MDdTWGHHmkMxSaNSDM9nN",
+      "code": "OgMlYokz",
+      "ip": "::1",
+      "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+      "ts": "2025-10-15T11:19:14.875Z"
+    },
+    {
+      "id": "A6SyEvObqWxBfEeMBUm3K",
+      "code": "OgMlYokz",
+      "ip": "::1",
+      "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+      "ts": "2025-10-15T11:31:04.179Z"
+    },
+    {
+      "id": "0DczaK4wYIatO7KyhU3bZ",
+      "code": "OgMlYokz",
+      "ip": "::1",
+      "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+      "ts": "2025-10-15T11:31:10.619Z"
+    }
+  ],
+  "conversions": [
+    {
+      "id": "eeVWbvzWyivGrLswPZSQ9",
+      "code": "OgMlYokz",
+      "order_id": "ORD-1760527473560-QP455C",
+      "amount_cents": 44910,
+      "ts": "2025-10-15T11:24:33.579Z"
+    },
+    {
+      "id": "GWtmITZ-eAi_2oSLMjQqv",
+      "code": "OgMlYokz",
+      "order_id": "ORD-1760527866131-JN2AUT",
+      "amount_cents": 44910,
+      "ts": "2025-10-15T11:31:06.147Z"
+    },
+    {
+      "id": "n7avqYloFYno-apSJPFeB",
+      "code": "OgMlYokz",
+      "order_id": "ORD-1760527874265-5WMQD7",
+      "amount_cents": 44910,
+      "ts": "2025-10-15T11:31:14.281Z"
+    }
+  ],
+  "commissions": [
+    {
+      "id": "i_sV58lUEHfT7uC5KacvE",
+      "code": "OgMlYokz",
+      "conversion_id": "eeVWbvzWyivGrLswPZSQ9",
+      "amount_cents": 4491,
+      "status": "pending",
+      "ts": "2025-10-15T11:24:33.580Z"
+    },
+    {
+      "id": "ru10SG0JBppW_liGVVhDI",
+      "code": "OgMlYokz",
+      "conversion_id": "GWtmITZ-eAi_2oSLMjQqv",
+      "amount_cents": 4491,
+      "status": "pending",
+      "ts": "2025-10-15T11:31:06.148Z"
+    },
+    {
+      "id": "OGy41bRSJezNzmv-jqzzy",
+      "code": "OgMlYokz",
+      "conversion_id": "n7avqYloFYno-apSJPFeB",
+      "amount_cents": 4491,
+      "status": "pending",
+      "ts": "2025-10-15T11:31:14.282Z"
+    }
+  ],
+  "payouts": [
+    {
+      "id": "SSBJikw_7N-ULLkyoIbiz",
+      "code": "OgMlYokz",
+      "amount_cents": 13473,
+      "status": "approved",
+      "ts": "2025-10-15T11:31:48.137Z"
+    }
+  ],
+  "merchants": [
+    {
+      "id": "m1",
+      "name": "Demo Host",
+      "checkout_url": "http://localhost:3000/checkout.html",
+      "coupon_param": "coupon",
+      "razorpay_webhook_secret": ""
+    }
+  ],
+  "coupons": [
+    {
+      "merchantId": "m1",
+      "affiliateCode": "OgMlYokz",
+      "coupon": "SAVE10"
+    }
+  ]
+}

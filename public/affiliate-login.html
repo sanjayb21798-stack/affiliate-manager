@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Affiliate Login</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: linear-gradient(135deg, #0f172a, #1e293b);
+      color: #f1f5f9;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+    }
+    .login-card {
+      background: linear-gradient(135deg, #b08d57, #3b82f6);
+      border-radius: 12px;
+      padding: 3px;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+    }
+    .inner {
+      background: #0f172a;
+      border-radius: 10px;
+      padding: 30px;
+      width: 320px;
+      text-align: center;
+    }
+    h2 {
+      margin-bottom: 20px;
+      color: #f8fafc;
+    }
+    input {
+      width: 100%;
+      padding: 10px;
+      margin: 10px 0;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      background-color: #1e293b;
+      color: #f8fafc;
+    }
+    button {
+      width: 100%;
+      background: linear-gradient(135deg, #3b82f6, #b08d57);
+      border: none;
+      border-radius: 8px;
+      color: #0f172a;
+      font-weight: bold;
+      padding: 10px;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+    button:hover {
+      opacity: 0.9;
+    }
+    .error {
+      margin-top: 10px;
+      color: #f87171;
+      font-size: 14px;
+      min-height: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="login-card">
+    <div class="inner">
+      <h2>Affiliate Login</h2>
+      <form id="loginForm">
+        <input type="text" id="code" placeholder="Affiliate Code" required />
+        <input type="password" id="pin" placeholder="PIN (6-digit)" required />
+        <button type="submit">Login</button>
+      </form>
+      <div id="error" class="error"></div>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('loginForm');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const code = document.getElementById('code').value.trim();
+      const pin = document.getElementById('pin').value.trim();
+      const res = await fetch('/api/affiliate/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, pin }),
+      });
+      if (res.ok) {
+        window.location.href = '/affiliate.html';
+      } else {
+        document.getElementById('error').textContent = 'Invalid code or PIN';
+      }
+    });
+  </script>
+</body>
+</html>

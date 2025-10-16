@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Affiliate Dashboard</title>
+  <style>
+    :root{--bg:#0f172a;--panel:#0b1b2e;--text:#e5e7eb;--muted:#9ca3af;--border:rgba(255,255,255,.08)}
+    *{box-sizing:border-box}
+    body{margin:0;padding:24px;background:#0f172a;color:#e5e7eb;font-family:system-ui,Segoe UI,Roboto,Arial}
+    .card{background:#0b1b2e;border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px}
+    table{width:100%;border-collapse:collapse;margin-top:8px} th,td{border-bottom:1px solid var(--border);padding:8px;text-align:left}
+    .row{display:flex;gap:8px;flex-wrap:wrap} input,button{padding:10px;border-radius:10px;border:1px solid var(--border);background:#0a1529;color:#e5e7eb}
+    a{color:#93c5fd}
+  </style>
+</head>
+<body>
+  <h1>Affiliate Dashboard</h1>
+
+  <div class="card">
+    <div id="info">Loading…</div>
+  </div>
+
+  <div class="card">
+    <h3>Request Payout</h3>
+    <div class="row">
+      <input id="amt" type="number" min="0" placeholder="Amount ₹ (blank = MAX)"/>
+      <button id="req">Request</button>
+      <button id="logout">Logout</button>
+    </div>
+    <div id="msg" style="margin-top:8px;color:#9ca3af"></div>
+  </div>
+
+  <script>
+    async function j(u,o){const r=await fetch(u,{headers:{'Content-Type':'application/json'},...o}); if(!r.ok) throw new Error(await r.text()); return r.json();}
+    async function me(){ return j('/api/affiliate/me'); }
+
+    async function load(){
+      try{
+        const m = await me();
+        document.getElementById('info').innerHTML = `
+          <div><b>${m.name}</b> — code <code>${m.code}</code> — rate ${(m.rateBps/100).toFixed(2)}%</div>
+          <table>
+            <tr><th>Clicks</th><td>${m.clicks}</td></tr>
+            <tr><th>Conversions</th><td>${m.conversions}</td></tr>
+            <tr><th>Revenue (₹)</th><td>${m.revenue}</td></tr>
+            <tr><th>Earned (₹)</th><td>${m.earned}</td></tr>
+            <tr><th>Paid-Out (₹)</th><td>${m.paidOut}</td></tr>
+            <tr><th>Available (₹)</th><td><b>${m.available}</b></td></tr>
+            <tr><th>Share Link</th><td><a href="${m.shareLink}" target="_blank">${m.shareLink}</a></td></tr>
+          </table>`;
+      }catch(e){
+        location.href = '/affiliate-login.html';
+      }
+    }
+
+    document.getElementById('logout').onclick = () => {
+      fetch('/api/affiliate/logout', { method: 'POST' }).then(() => location.href='/affiliate-login.html');
+    };
+
+    document.getElementById('req').onclick = async () => {
+      try{
+        const m = await me();
+        const amt = document.getElementById('amt').value ? Number(document.getElementById('amt').value) : null;
+        const body = { code: m.code }; if (amt != null) body.amountCents = Math.round(amt * 100);
+        const r = await j('/api/payouts/request', { method:'POST', body: JSON.stringify(body) });
+        document.getElementById('msg').textContent = `Requested payout #${r.payoutId}`;
+        document.getElementById('amt').value = '';
+        await load();
+      }catch(err){
+        document.getElementById('msg').textContent = 'Error: ' + err.message;
+      }
+    };
+
+    load();
+  </script>
+</body>
+</html>
