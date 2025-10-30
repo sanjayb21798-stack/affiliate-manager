@@ -1,7 +1,4 @@
-// server.js — Affiliate Manager (JSON DB)
-// Features: Admin login, Affiliate login (code+PIN), PIN reset (admin),
-// Merchants + coupons, redirect with coupon injection, conversions, payouts, CSV exports,
-// Razorpay webhook (verified), Manual UPI/offline conversion (admin).
+// server.js — Affiliate Manager (multi-role: Owner, Admin, Affiliate)
 
 const express = require('express');
 const cors = require('cors');
@@ -9,27 +6,30 @@ const crypto = require('crypto');
 const { nanoid } = require('nanoid');
 const session = require('express-session');
 const bcrypt = require('bcryptjs');
+const path = require('path');
 
 const { db, save } = require('./store');
 
 const app = express();
 
 /* -------------------- Config -------------------- */
-const ADMIN_KEY = process.env.ADMIN_KEY || 'changeme-admin-key';   // legacy header support for scripts
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';           // optional global secret for webhooks (/webhooks/razorpay AND /api/convert)
+// Owner (Platform) creds (use 'plain:password' in dev)
+const OWNER_USER = process.env.OWNER_USER || 'aidmd';
+const OWNER_PASSWORD = process.env.OWNER_PASSWORD || 'plain:eleven';
+
+// For legacy script calls (optional)
+const ADMIN_KEY = process.env.ADMIN_KEY || 'changeme-admin-key';
+// Optional HMAC for /api/convert
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
 
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-session-secret';
-const ADMIN_USER = process.env.ADMIN_USER || 'admin';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'plain:admin123'; // use 'plain:password' in dev
 
-/* -------------------- Middleware (order matters!) -------------------- */
+// Backward compatibility bootstrap admin (used only if no admins exist)
+const BOOT_ADMIN_USER = process.env.ADMIN_USER || 'admin';
+const BOOT_ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'plain:admin123';
+
+/* -------------------- Middleware -------------------- */
 app.use(cors());
-
-// IMPORTANT: For Razorpay, we must read the **raw body** to verify signature.
-// So we install a path-specific raw parser BEFORE express.json().
-app.use('/webhooks/razorpay', express.raw({ type: '*/*' })); // raw Buffer on req.body for this path only
-
-// Normal parsers for the rest of the app
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
@@ -38,138 +38,176 @@ app.use(session({
   secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
-  cookie: {
-    httpOnly: true,
-    sameSite: 'lax',
-    maxAge: 7 * 24 * 3600 * 1000 // 7 days
-    // secure: true // enable when serving over HTTPS
-  }
+  cookie: { httpOnly: true, sameSite: 'lax', maxAge: 7 * 24 * 3600 * 1000 }
 }));
 
-app.use(express.static('public'));
+app.use(express.static(path.join(__dirname, 'public')));
 
 /* -------------------- Utils -------------------- */
 const nowISO = () => new Date().toISOString();
 const centsToRs = (c) => (c / 100).toFixed(2);
 
 function getAffiliateByCode(code) {
-  return (db.affiliates || []).find((a) => a.code === code);
+  return db.affiliates.find((a) => a.code === code);
 }
 function availableFor(code) {
-  const earned = (db.commissions || []).filter((m) => m.code === code).reduce((s, m) => s + m.amount_cents, 0);
-  const paid = (db.payouts || []).filter((p) => p.code === code && ['approved', 'paid'].includes(p.status))
-                                 .reduce((s, p) => s + p.amount_cents, 0);
+  const earned = db.commissions.filter((m) => m.code === code).reduce((s, m) => s + m.amount_cents, 0);
+  const paid = db.payouts.filter((p) => p.code === code && ['approved', 'paid'].includes(p.status))
+                         .reduce((s, p) => s + p.amount_cents, 0);
   return Math.max(0, earned - paid);
 }
-function getMerchant(id) {
-  return (db.merchants || []).find(m => m.id === id);
-}
-function getCouponFor(merchantId, affiliateCode) {
-  return (db.coupons || []).find(c => c.merchantId === merchantId && c.affiliateCode === affiliateCode);
+function escLikeAdminScope(adminId) {
+  // include rows with matching admin_id OR missing (old data) to not break MVP
+  return (row) => (row.admin_id === adminId) || (row.admin_id == null);
 }
 
-/* --- Helper: add a conversion + commission (dedupe by code+orderId) --- */
-function addConversion(code, orderId, amountCents) {
-  const aff = getAffiliateByCode(code);
-  if (!aff) return { ok:false, status:404, error:'unknown affiliate code' };
+/* -------------------- Bootstraps -------------------- */
+let ownerPassHash = null;
+(function prepOwner() {
+  if (OWNER_PASSWORD.startsWith('plain:')) ownerPassHash = bcrypt.hashSync(OWNER_PASSWORD.slice(6), 10);
+  else ownerPassHash = OWNER_PASSWORD;
+})();
 
-  if ((db.conversions || []).find(v => v.code === code && v.order_id === orderId)) {
-    const dup = db.conversions.find(v => v.code === code && v.order_id === orderId);
-    return { ok:false, status:409, error:'duplicate conversion', conversionId: dup.id };
-  }
-
-  const amt = Math.max(0, Number(amountCents || 0));
-  const conv = { id: nanoid(), code, order_id: orderId, amount_cents: amt, ts: nowISO() };
-  db.conversions.push(conv);
-
-  const commission = Math.floor((amt * aff.rate_bps) / 10000);
-  db.commissions.push({
-    id: nanoid(),
-    code,
-    conversion_id: conv.id,
-    amount_cents: commission,
-    status: 'pending',
-    ts: nowISO()
-  });
-
-  save(db);
-  return { ok:true, conversionId: conv.id, commissionCents: commission };
-}
-
-/* -------------------- Admin auth helpers -------------------- */
-let adminPassHash = null;
-(function prepareAdminHash(){
-  if (ADMIN_PASSWORD.startsWith('plain:')) {
-    adminPassHash = bcrypt.hashSync(ADMIN_PASSWORD.slice(6), 10);
-  } else {
-    adminPassHash = ADMIN_PASSWORD; // pre-hashed bcrypt allowed
+// If no admins in DB, create a bootstrap admin from env
+(function ensureBootstrapAdmin() {
+  if (!Array.isArray(db.admins)) db.admins = [];
+  if (db.admins.length === 0) {
+    const passHash = BOOT_ADMIN_PASSWORD.startsWith('plain:')
+      ? bcrypt.hashSync(BOOT_ADMIN_PASSWORD.slice(6), 10)
+      : BOOT_ADMIN_PASSWORD;
+    db.admins.push({
+      id: nanoid(),
+      username: BOOT_ADMIN_USER,
+      name: 'Default Admin',
+      pass_hash: passHash,
+      created_at: nowISO()
+    });
+    save(db);
+    console.log(`Bootstrap admin created: ${BOOT_ADMIN_USER}`);
   }
 })();
-function isSessionAdmin(req) {
-  return req.session?.user === ADMIN_USER && req.session?.role === 'admin';
-}
-function requireAdmin(req, res, next) {
-  const headerOK = (req.headers['x-admin-key'] || '') === ADMIN_KEY;
-  if (isSessionAdmin(req) || headerOK) return next();
-  return res.status(401).json({ error: 'unauthorized' });
+
+/* -------------------- Auth helpers -------------------- */
+function isOwner(req){ return req.session?.role === 'owner'; }
+function isAdmin(req){ return req.session?.role === 'admin' && !!req.session?.adminId; }
+function isAffiliate(req){ return req.session?.role === 'affiliate' && !!req.session?.affCode; }
+
+function requireOwner(req,res,next){ if (isOwner(req)) return next(); return res.status(401).json({error:'unauthorized'}); }
+function requireAdmin(req,res,next){
+  const headerOK = (req.headers['x-admin-key'] || '') === ADMIN_KEY; // legacy
+  if (isAdmin(req) || headerOK) return next();
+  return res.status(401).json({error:'unauthorized'});
 }
 
-/* -------------------- Affiliate session helper -------------------- */
-function isAffiliate(req){
-  return req.session?.role === 'affiliate' && !!req.session?.affCode;
-}
+/* -------------------- Health -------------------- */
+app.get('/healthz', (_req,res) => res.json({ok:true}));
 
-/* -------------------- Admin auth routes -------------------- */
+/* -------------------- Home + Static Landing -------------------- */
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+app.get('/login.html', (req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html'))); // admin login
+app.get('/affiliate-login.html', (req, res) => res.sendFile(path.join(__dirname, 'public', 'affiliate-login.html')));
+app.get('/owner-login.html', (req, res) => res.sendFile(path.join(__dirname, 'public', 'owner-login.html')));
+app.get('/owner.html', (req, res) => res.sendFile(path.join(__dirname, 'public', 'owner.html')));
+
+/* -------------------- Owner Auth -------------------- */
+app.post('/api/owner/login', async (req, res) => {
+  const { username, password } = req.body || {};
+  if (username !== OWNER_USER) return res.status(401).json({ error: 'invalid credentials' });
+  const ok = await bcrypt.compare(password || '', ownerPassHash);
+  if (!ok) return res.status(401).json({ error: 'invalid credentials' });
+  req.session.role = 'owner';
+  req.session.user = OWNER_USER;
+  res.json({ ok: true, user: OWNER_USER, role: 'owner' });
+});
+app.post('/api/owner/logout', (req, res) => req.session.destroy(() => res.json({ ok: true })));
+app.get('/api/owner/me', (req, res) => res.json(isOwner(req) ? { user: OWNER_USER, role:'owner' } : { user:null }));
+
+/* -------------------- Owner: Admins CRUD -------------------- */
+app.get('/api/owner/admins', requireOwner, (req, res) => {
+  const rows = db.admins.map(a => ({ id:a.id, username:a.username, name:a.name, created_at:a.created_at }));
+  res.json(rows);
+});
+
+app.post('/api/owner/admins', requireOwner, (req, res) => {
+  const { username, name, password } = req.body || {};
+  if (!username || !password) return res.status(400).json({ error: 'username and password required' });
+  if (db.admins.some(a => a.username === username)) return res.status(409).json({ error: 'username exists' });
+  const pass_hash = bcrypt.hashSync(password, 10);
+  const admin = { id: nanoid(), username, name: (name||username), pass_hash, created_at: nowISO() };
+  db.admins.push(admin); save(db);
+  res.json({ ok: true, id: admin.id });
+});
+
+app.post('/api/owner/admins/:id/reset-password', requireOwner, (req, res) => {
+  const a = db.admins.find(x => x.id === req.params.id);
+  if (!a) return res.status(404).json({ error: 'not found' });
+  const { password } = req.body || {};
+  if (!password) return res.status(400).json({ error: 'password required' });
+  a.pass_hash = bcrypt.hashSync(password, 10);
+  save(db);
+  res.json({ ok: true });
+});
+
+/* -------------------- Owner: Overview -------------------- */
+app.get('/api/owner/overview', requireOwner, (req, res) => {
+  const totalAdmins = db.admins.length;
+  const totalAffiliates = db.affiliates.length;
+  res.json({ totalAdmins, totalAffiliates });
+});
+
+/* -------------------- Admin Auth (multi-tenant) -------------------- */
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body || {};
-  if (username !== ADMIN_USER) return res.status(401).json({ error: 'invalid credentials' });
-  const ok = await bcrypt.compare(password || '', adminPassHash);
+  const a = db.admins.find(x => x.username === String(username||'').trim());
+  if (!a) return res.status(401).json({ error: 'invalid credentials' });
+  const ok = await bcrypt.compare(String(password||''), a.pass_hash);
   if (!ok) return res.status(401).json({ error: 'invalid credentials' });
-  req.session.user = ADMIN_USER;
   req.session.role = 'admin';
-  res.json({ ok: true, user: ADMIN_USER });
+  req.session.adminId = a.id;
+  req.session.adminUsername = a.username;
+  res.json({ ok: true, user: a.username, role: 'admin' });
 });
-app.post('/api/logout', (req, res) => req.session.destroy(() => res.json({ ok: true })));
+app.post('/api/logout', (req, res) => req.session.destroy(() => res.json({ ok:true })));
 app.get('/api/me', (req, res) => {
-  if (!isSessionAdmin(req)) return res.json({ user: null });
-  res.json({ user: ADMIN_USER, role: 'admin' });
+  if (!isAdmin(req)) return res.json({ user: null });
+  res.json({ user: req.session.adminUsername, role: 'admin' });
 });
 
-/* -------------------- Create affiliate (with PIN) -------------------- */
-app.post('/api/affiliates', (req, res) => {
+/* -------------------- Create affiliate (scoped) -------------------- */
+app.post('/api/affiliates', requireAdmin, (req, res) => {
   const name = (req.body.name || '').trim();
   const rateBps = Math.max(0, Math.min(10000, Number(req.body.rateBps ?? 1000)));
   if (!name) return res.status(400).json({ error: 'name is required' });
 
-  const pin = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit PIN
+  const pin = Math.floor(100000 + Math.random() * 900000).toString();
   const pin_hash = bcrypt.hashSync(pin, 10);
 
   const affiliate = {
     id: nanoid(),
+    admin_id: req.session.adminId,         // scope!
     name,
     code: nanoid(8),
     rate_bps: rateBps,
     pin_hash,
     created_at: nowISO(),
   };
-  db.affiliates.push(affiliate);
-  save(db);
+  db.affiliates.push(affiliate); save(db);
 
   res.json({
     id: affiliate.id,
     name: affiliate.name,
     code: affiliate.code,
-    pin, // show once so admin can share
+    pin,
     rateBps: affiliate.rate_bps,
     link: `http://localhost:3000/r/${affiliate.code}`,
-    portal: `http://localhost:3000/affiliate-login.html`
+    portal: `/affiliate-login.html`
   });
 });
 
 /* -------------------- Admin: reset affiliate PIN -------------------- */
 app.post('/api/admin/affiliates/:code/reset-pin', requireAdmin, (req, res) => {
   const code = req.params.code;
-  const a = getAffiliateByCode(code);
+  const a = db.affiliates.find(x => x.code === code && escLikeAdminScope(req.session.adminId)(x));
   if (!a) return res.status(404).json({ error: 'unknown affiliate code' });
   const newPin = Math.floor(100000 + Math.random() * 900000).toString();
   a.pin_hash = bcrypt.hashSync(newPin, 10);
@@ -177,12 +215,12 @@ app.post('/api/admin/affiliates/:code/reset-pin', requireAdmin, (req, res) => {
   res.json({ ok: true, newPin });
 });
 
-/* -------------------- Affiliate session routes -------------------- */
+/* -------------------- Affiliate session -------------------- */
 app.post('/api/affiliate/login', async (req, res) => {
   const { code, pin } = req.body || {};
-  const a = db.affiliates.find(x => x.code === String(code || '').trim());
+  const a = db.affiliates.find(x => x.code === String(code||'').trim());
   if (!a) return res.status(401).json({ error: 'invalid code or pin' });
-  const ok = await bcrypt.compare(String(pin || '').trim(), a.pin_hash);
+  const ok = await bcrypt.compare(String(pin||'').trim(), a.pin_hash);
   if (!ok) return res.status(401).json({ error: 'invalid code or pin' });
   req.session.role = 'affiliate';
   req.session.affCode = a.code;
@@ -198,11 +236,11 @@ app.get('/api/affiliate/me', (req, res) => {
   const a = getAffiliateByCode(code);
   if (!a) return res.status(404).json({ error: 'unknown code' });
 
-  const clicks = (db.clicks || []).filter((c) => c.code === code).length;
-  const convs = (db.conversions || []).filter((v) => v.code === code);
+  const clicks = db.clicks.filter((c) => c.code === code).length;
+  const convs = db.conversions.filter((v) => v.code === code);
   const revenue = convs.reduce((s, v) => s + v.amount_cents, 0);
-  const earned = (db.commissions || []).filter((m) => m.code === code).reduce((s, m) => s + m.amount_cents, 0);
-  const paid = (db.payouts || []).filter((p) => p.code === code && ['approved','paid'].includes(p.status)).reduce((s, p) => s + p.amount_cents, 0);
+  const earned = db.commissions.filter((m) => m.code === code).reduce((s, m) => s + m.amount_cents, 0);
+  const paid = db.payouts.filter((p) => p.code === code && ['approved','paid'].includes(p.status)).reduce((s, p) => s + p.amount_cents, 0);
   const avail = Math.max(0, earned - paid);
 
   res.json({
@@ -215,38 +253,52 @@ app.get('/api/affiliate/me', (req, res) => {
     earned: (earned/100).toFixed(2),
     paidOut: (paid/100).toFixed(2),
     available: (avail/100).toFixed(2),
-    shareLink: `http://localhost:3000/r/${a.code}`
+    shareLink: `/r/${a.code}`
   });
 });
 
-/* -------------------- Merchants & coupons -------------------- */
+/* -------------------- Merchants + coupons (scoped) -------------------- */
+function getMerchant(id) {
+  return (db.merchants || []).find(m => m.id === id);
+}
+function getCouponFor(merchantId, affiliateCode) {
+  return (db.coupons || []).find(c => c.merchantId === merchantId && c.affiliateCode === affiliateCode);
+}
+
 app.post('/api/merchants', requireAdmin, (req, res) => {
   const { id, name, checkout_url, coupon_param, razorpay_webhook_secret } = req.body || {};
   if (!id || !name || !checkout_url || !coupon_param) {
     return res.status(400).json({ error: 'id, name, checkout_url, coupon_param required' });
   }
   db.merchants = db.merchants || [];
-  if (db.merchants.some(m => m.id === id)) return res.status(409).json({ error: 'merchant id exists' });
+  if (db.merchants.some(m => m.id === id && escLikeAdminScope(req.session.adminId)(m))) {
+    return res.status(409).json({ error: 'merchant id exists' });
+  }
 
   db.merchants.push({
     id, name, checkout_url, coupon_param,
+    admin_id: req.session.adminId,          // scope!
     razorpay_webhook_secret: razorpay_webhook_secret || ''
   });
   save(db);
   res.json({ ok: true });
 });
+
 app.post('/api/coupons', requireAdmin, (req, res) => {
   const { merchantId, affiliateCode, coupon } = req.body || {};
   if (!merchantId || !affiliateCode || !coupon) {
     return res.status(400).json({ error: 'merchantId, affiliateCode, coupon required' });
   }
-  if (!getMerchant(merchantId)) return res.status(404).json({ error: 'unknown merchantId' });
-  if (!getAffiliateByCode(affiliateCode)) return res.status(404).json({ error: 'unknown affiliateCode' });
+  const m = db.merchants.find(x => x.id === merchantId && escLikeAdminScope(req.session.adminId)(x));
+  if (!m) return res.status(404).json({ error: 'unknown merchantId' });
+
+  const a = db.affiliates.find(x => x.code === affiliateCode && escLikeAdminScope(req.session.adminId)(x));
+  if (!a) return res.status(404).json({ error: 'unknown affiliateCode' });
 
   db.coupons = db.coupons || [];
   const existing = db.coupons.find(c => c.merchantId === merchantId && c.affiliateCode === affiliateCode);
-  if (existing) existing.coupon = coupon; else db.coupons.push({ merchantId, affiliateCode, coupon });
-
+  if (existing) existing.coupon = coupon;
+  else db.coupons.push({ merchantId, affiliateCode, coupon, admin_id: req.session.adminId }); // scope
   save(db);
   res.json({ ok: true });
 });
@@ -259,7 +311,6 @@ app.get('/r/:code', (req, res) => {
 
   // record click
   const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').toString();
-  db.clicks = db.clicks || [];
   db.clicks.push({ id: nanoid(), code, ip, ua: req.headers['user-agent'] || '', ts: nowISO() });
   save(db);
 
@@ -271,7 +322,6 @@ app.get('/r/:code', (req, res) => {
   const map = getCouponFor(merchantId, code);
   if (!map) return res.status(404).send('No coupon mapped for this affiliate and merchant');
 
-  // build checkout URL with coupon + aff (invisible to customer)
   const u = new URL(m.checkout_url);
   const couponParam = m.coupon_param || 'coupon';
   u.searchParams.set(couponParam, map.coupon);
@@ -280,9 +330,9 @@ app.get('/r/:code', (req, res) => {
   res.redirect(u.toString());
 });
 
-/* -------------------- Optional HMAC verification for /api/convert -------------------- */
+/* -------------------- Conversion (sales only) -------------------- */
 function verifyWebhook(req) {
-  if (!WEBHOOK_SECRET) return true; // disabled for local demo
+  if (!WEBHOOK_SECRET) return true;
   const sig = req.headers['x-signature'];
   if (!sig) return false;
   const canonical = JSON.stringify({
@@ -294,93 +344,50 @@ function verifyWebhook(req) {
   return crypto.timingSafeEqual(Buffer.from(h), Buffer.from(sig));
 }
 
-/* -------------------- Conversion (generic/manual) -------------------- */
 app.post('/api/convert', (req, res) => {
   const { code, orderId, amountCents } = req.body || {};
   if (!code || !orderId) return res.status(400).json({ error: 'code and orderId required' });
   if (!verifyWebhook(req)) return res.status(401).json({ error: 'invalid signature' });
 
-  const r = addConversion(code, orderId, Number(amountCents || 0));
-  if (!r.ok) return res.status(r.status || 400).json(r);
-  res.json(r);
+  const aff = getAffiliateByCode(code);
+  if (!aff) return res.status(404).json({ error: 'unknown affiliate code' });
+
+  const dup = db.conversions.find((v) => v.code === code && v.order_id === orderId);
+  if (dup) return res.status(409).json({ error: 'duplicate conversion', conversionId: dup.id });
+
+  const amount = Math.max(0, Number(amountCents || 0));
+  const conv = { id: nanoid(), code, order_id: orderId, amount_cents: amount, ts: nowISO(), admin_id: aff.admin_id || null };
+  db.conversions.push(conv);
+
+  const commission = Math.floor((amount * aff.rate_bps) / 10000);
+  db.commissions.push({
+    id: nanoid(),
+    code,
+    conversion_id: conv.id,
+    amount_cents: commission,
+    status: 'pending',
+    ts: nowISO(),
+    admin_id: aff.admin_id || null
+  });
+
+  save(db);
+  res.json({ ok: true, conversionId: conv.id, commissionCents: commission });
 });
 
-/* -------------------- Razorpay webhook (verified with raw body) -------------------- */
-// Razorpay sends HMAC in X-Razorpay-Signature over raw body.
-// We also support per-merchant secrets (merchant.razorpay_webhook_secret) with notes.merchantId.
-app.post('/webhooks/razorpay', (req, res) => {
-  try {
-    const rpSig = req.headers['x-razorpay-signature'];
-    const bodyBuf = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || '');
-    const bodyStr = bodyBuf.toString('utf8');
-
-    // Parse event
-    let evt;
-    try { evt = JSON.parse(bodyStr); } catch { return res.status(400).send('bad json'); }
-    const eventType = String(evt?.event || '');
-    const payment = evt?.payload?.payment?.entity || null;
-
-    // Determine merchant + secret
-    const merchantId = payment?.notes?.merchantId || 'm1';
-    const merchant = getMerchant(merchantId);
-    const secret = merchant?.razorpay_webhook_secret || WEBHOOK_SECRET;
-    if (!secret) return res.status(401).send('no secret');
-
-    // Verify signature
-    const h = crypto.createHmac('sha256', secret).update(bodyStr).digest('hex');
-    if (!crypto.timingSafeEqual(Buffer.from(h), Buffer.from(String(rpSig || ''), 'utf8'))) {
-      return res.status(401).send('bad signature');
-    }
-
-    // Accept only success events
-    if (!['payment.captured', 'order.paid'].includes(eventType)) {
-      return res.status(200).json({ ok:true, ignored:true, event:eventType });
-    }
-
-    // Extract data
-    let code = payment?.notes?.aff || null;            // preferred
-    const coupon = payment?.notes?.coupon || null;     // optional fallback
-    const orderId = payment?.order_id || payment?.id || `rp-${Date.now()}`;
-    const amountCents = Number(payment?.amount || 0);  // paise
-
-    // If no 'aff', try resolving via coupon mapping
-    if (!code && coupon) {
-      const map = (db.coupons || []).find(c => c.merchantId === merchantId && c.coupon === coupon);
-      if (map) code = map.affiliateCode;
-    }
-    if (!code) return res.status(400).json({ error:'no affiliate code in notes and no coupon mapping' });
-
-    const r = addConversion(code, orderId, amountCents);
-    if (!r.ok) return res.status(r.status || 400).json(r);
-
-    return res.status(200).json({ ok:true, event:eventType, ...r });
-  } catch (e) {
-    console.error('Razorpay webhook error', e);
-    return res.status(400).send('bad payload');
-  }
-});
-
-/* -------------------- Admin manual conversion (UPI/offline) -------------------- */
-app.post('/api/admin/manual-convert', requireAdmin, (req, res) => {
-  const { code, orderId, amountCents, amountRupees } = req.body || {};
-  if (!code || !orderId) return res.status(400).json({ error: 'code and orderId required' });
-  const cents = amountCents != null ? Number(amountCents) : Math.round(Number(amountRupees || 0) * 100);
-  const r = addConversion(code, orderId, cents);
-  if (!r.ok) return res.status(r.status || 400).json(r);
-  res.json(r);
-});
-
-/* -------------------- Stats (admin overview) -------------------- */
-app.get('/api/stats', (req, res) => {
-  const rows = (db.affiliates || [])
+/* -------------------- Stats -------------------- */
+// Admin view (scoped)
+app.get('/api/stats', requireAdmin, (req, res) => {
+  const scope = escLikeAdminScope(req.session.adminId);
+  const rows = db.affiliates
+    .filter(scope)
     .slice()
     .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
     .map((a) => {
-      const clicks = (db.clicks || []).filter((c) => c.code === a.code).length;
-      const convs = (db.conversions || []).filter((v) => v.code === a.code);
+      const clicks = db.clicks.filter((c) => c.code === a.code).length;
+      const convs = db.conversions.filter((v) => v.code === a.code);
       const revenue = convs.reduce((s, v) => s + v.amount_cents, 0);
-      const earned = (db.commissions || []).filter((m) => m.code === a.code).reduce((s, m) => s + m.amount_cents, 0);
-      const paid = (db.payouts || []).filter((p) => p.code === a.code && ['approved', 'paid'].includes(p.status)).reduce((s, p) => s + p.amount_cents, 0);
+      const earned = db.commissions.filter((m) => m.code === a.code).reduce((s, m) => s + m.amount_cents, 0);
+      const paid = db.payouts.filter((p) => p.code === a.code && ['approved', 'paid'].includes(p.status)).reduce((s, p) => s + p.amount_cents, 0);
       const avail = Math.max(0, earned - paid);
 
       return {
@@ -393,25 +400,25 @@ app.get('/api/stats', (req, res) => {
         earned: centsToRs(earned),
         paidOut: centsToRs(paid),
         available: centsToRs(avail),
-        shareLink: `http://localhost:3000/r/${a.code}`,
-        portal: `http://localhost:3000/affiliate-login.html`
+        shareLink: `/r/${a.code}`,
+        portal: `/affiliate-login.html`
       };
     });
 
   res.json(rows);
 });
 
-/* -------------------- Affiliate public stats by code -------------------- */
+// Public affiliate stats by code (unchanged)
 app.get('/api/affiliate/:code', (req, res) => {
   const code = req.params.code;
   const a = getAffiliateByCode(code);
   if (!a) return res.status(404).json({ error: 'unknown code' });
 
-  const clicks = (db.clicks || []).filter((c) => c.code === code).length;
-  const convs = (db.conversions || []).filter((v) => v.code === code);
+  const clicks = db.clicks.filter((c) => c.code === code).length;
+  const convs = db.conversions.filter((v) => v.code === code);
   const revenue = convs.reduce((s, v) => s + v.amount_cents, 0);
-  const earned = (db.commissions || []).filter((m) => m.code === code).reduce((s, m) => s + m.amount_cents, 0);
-  const paid = (db.payouts || []).filter((p) => p.code === code && ['approved', 'paid'].includes(p.status)).reduce((s, p) => s + p.amount_cents, 0);
+  const earned = db.commissions.filter((m) => m.code === code).reduce((s, m) => s + m.amount_cents, 0);
+  const paid = db.payouts.filter((p) => p.code === code && ['approved','paid'].includes(p.status)).reduce((s, p) => s + p.amount_cents, 0);
   const avail = Math.max(0, earned - paid);
 
   res.json({
@@ -424,7 +431,7 @@ app.get('/api/affiliate/:code', (req, res) => {
     earned: centsToRs(earned),
     paidOut: centsToRs(paid),
     available: centsToRs(avail),
-    shareLink: `http://localhost:3000/r/${a.code}`
+    shareLink: `/r/${a.code}`
   });
 });
 
@@ -440,34 +447,28 @@ app.post('/api/payouts/request', (req, res) => {
   if (amountCents <= 0) return res.status(400).json({ error: 'nothing available to payout' });
   if (amountCents > avail) return res.status(400).json({ error: 'amount exceeds available' });
 
-  const MIN_WITHDRAW_CENTS = 10000; // ₹100 minimum
-  if (amountCents < MIN_WITHDRAW_CENTS) {
-    return res.status(400).json({ error: 'minimum withdrawal is ₹100.00' });
-  }
+  const MIN_WITHDRAW_CENTS = 10000; // ₹100
+  if (amountCents < MIN_WITHDRAW_CENTS) return res.status(400).json({ error: 'minimum withdrawal is ₹100.00' });
 
-  db.payouts = db.payouts || [];
-  const payout = { id: nanoid(), code, amount_cents: Math.floor(amountCents), status: 'requested', ts: nowISO() };
-  db.payouts.push(payout);
-  save(db);
+  const payout = { id: nanoid(), code, amount_cents: Math.floor(amountCents), status: 'requested', ts: nowISO(), admin_id: a.admin_id || null };
+  db.payouts.push(payout); save(db);
   res.json({ ok: true, payoutId: payout.id });
 });
 
 app.get('/api/admin/payouts', requireAdmin, (req, res) => {
-  const rows = (db.payouts || []).slice().sort((a, b) => (a.ts < b.ts ? 1 : -1));
-  res.json(rows);
+  const scope = escLikeAdminScope(req.session.adminId);
+  res.json(db.payouts.filter(scope).slice().sort((a,b)=> (a.ts < b.ts ? 1 : -1)));
 });
 app.post('/api/admin/payouts/:id/approve', requireAdmin, (req, res) => {
-  const id = req.params.id;
-  const p = (db.payouts || []).find((x) => x.id === id);
+  const p = db.payouts.find((x) => x.id === req.params.id && escLikeAdminScope(req.session.adminId)(x));
   if (!p) return res.status(404).json({ error: 'not found' });
   if (p.status !== 'requested') return res.status(400).json({ error: 'not in requested state' });
   p.status = 'approved'; save(db); res.json({ ok: true });
 });
 app.post('/api/admin/payouts/:id/mark-paid', requireAdmin, (req, res) => {
-  const id = req.params.id;
-  const p = (db.payouts || []).find((x) => x.id === id);
+  const p = db.payouts.find((x) => x.id === req.params.id && escLikeAdminScope(req.session.adminId)(x));
   if (!p) return res.status(404).json({ error: 'not found' });
-  if (!['approved', 'paid'].includes(p.status)) return res.status(400).json({ error: 'must be approved first' });
+  if (!['approved','paid'].includes(p.status)) return res.status(400).json({ error: 'must be approved first' });
   p.status = 'paid'; save(db); res.json({ ok: true });
 });
 
@@ -482,8 +483,10 @@ function toCSV(rows, headers) {
   const body = rows.map((r) => headers.map((h) => esc(r[h])).join(',')).join('\n');
   return head + '\n' + body + '\n';
 }
+
 app.get('/api/admin/export/conversions.csv', requireAdmin, (req, res) => {
-  const rows = (db.conversions || []).map((v) => ({
+  const scope = escLikeAdminScope(req.session.adminId);
+  const rows = db.conversions.filter(scope).map((v) => ({
     id: v.id, code: v.code, order_id: v.order_id,
     amount_rupees: centsToRs(v.amount_cents), ts: v.ts
   }));
@@ -493,7 +496,8 @@ app.get('/api/admin/export/conversions.csv', requireAdmin, (req, res) => {
   res.send(csv);
 });
 app.get('/api/admin/export/payouts.csv', requireAdmin, (req, res) => {
-  const rows = (db.payouts || []).map((p) => ({
+  const scope = escLikeAdminScope(req.session.adminId);
+  const rows = db.payouts.filter(scope).map((p) => ({
     id: p.id, code: p.code, amount_rupees: centsToRs(p.amount_cents), status: p.status, ts: p.ts
   }));
   const csv = toCSV(rows, ['id','code','amount_rupees','status','ts']);
@@ -502,7 +506,10 @@ app.get('/api/admin/export/payouts.csv', requireAdmin, (req, res) => {
   res.send(csv);
 });
 
-/* -------------------- Start -------------------- */
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Affiliate manager running: http://localhost:${PORT}`));
+/* -------------------- Start server -------------------- */
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => {
+  console.log(`Affiliate manager running: http://localhost:${PORT}`);
+});
+
 
