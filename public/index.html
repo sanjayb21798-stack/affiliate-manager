@@ -1,203 +1,57 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>Affiliate Manager (Local)</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-
-  <!-- Simple, colorful theme (no external libs) -->
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Affiliate Manager — Home</title>
   <style>
     :root{
-      --bg: #0f172a;          /* slate-900 */
-      --bg-soft: #111827;     /* gray-900 */
-      --panel: #0b1220;       /* custom dark */
-      --card: #0b1b2e;        /* dark-blue panel */
-      --text: #e5e7eb;        /* gray-200 */
-      --muted: #9ca3af;       /* gray-400 */
-      --primary: #7c3aed;     /* violet-600 */
-      --primary-2: #a78bfa;   /* violet-300 */
-      --accent: #06b6d4;      /* cyan-500 */
-      --success: #10b981;     /* emerald-500 */
-      --warning: #f59e0b;     /* amber-500 */
-      --danger: #ef4444;      /* red-500 */
-      --ring: rgba(124, 58, 237, .5);
-      --border: rgba(255,255,255,0.08);
-      --shadow: 0 10px 30px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.03);
-      --radius: 16px;
+      --bg:#0f172a; --bg-soft:#111827; --card:#0b1b2e; --text:#e5e7eb; --muted:#9ca3af;
+      --primary:#7c3aed; --accent:#06b6d4; --border:rgba(255,255,255,.08);
     }
-
-    * { box-sizing: border-box; }
-    html, body { height: 100%; }
-    body {
-      margin: 0;
-      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
-      color: var(--text);
+    *{box-sizing:border-box}
+    body{
+      margin:0; min-height:100dvh; color:var(--text); font-family:system-ui,Segoe UI,Roboto,Arial;
       background:
         radial-gradient(1200px 600px at 10% -10%, rgba(124,58,237,.25), transparent 60%),
         radial-gradient(900px 500px at 110% 0%, rgba(6,182,212,.25), transparent 50%),
         linear-gradient(180deg, var(--bg) 0%, var(--bg-soft) 100%);
-      min-height: 100%;
+      display:grid; place-items:center; padding:24px;
     }
-
-    .container { max-width: 1100px; margin: 32px auto; padding: 0 16px; }
-
-    .hero {
-      background: linear-gradient(135deg, rgba(124,58,237,.25), rgba(6,182,212,.15));
-      border: 1px solid var(--border);
-      border-radius: 24px;
-      padding: 24px;
-      box-shadow: var(--shadow);
+    .wrap{width:100%; max-width:780px}
+    .card{
+      background:linear-gradient(180deg, var(--card), #091426);
+      border:1px solid var(--border); border-radius:20px; padding:24px;
     }
-    .hero h1 {
-      margin: 0 0 8px;
-      font-size: 28px;
-      letter-spacing: .2px;
+    h1{margin:0 0 6px; font-size:28px}
+    p{margin:0; color:var(--muted)}
+    .grid{display:grid; gap:12px; margin-top:16px}
+    @media (min-width:760px){ .grid{grid-template-columns:1fr 1fr 1fr} }
+    a.button{
+      display:flex; align-items:center; justify-content:center; text-decoration:none; color:var(--text);
+      padding:14px 16px; border-radius:12px; border:1px solid var(--border);
+      background:linear-gradient(135deg, var(--primary), var(--accent)); font-weight:700;
     }
-    .hero p { margin: 0; color: var(--muted); }
-
-    .grid {
-      display: grid;
-      gap: 16px;
-      grid-template-columns: 1fr;
-    }
-    @media (min-width: 900px) {
-      .grid { grid-template-columns: 1fr 1fr; }
-    }
-
-    .card {
-      background: linear-gradient(180deg, var(--card), #091426);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 16px;
-      box-shadow: var(--shadow);
-    }
-    .card h3 { margin: 0 0 10px; font-size: 18px; }
-    .muted { color: var(--muted); font-size: 12px; }
-
-    .row { display: flex; gap: 8px; flex-wrap: wrap; }
-    input, button {
-      padding: 10px 12px;
-      border-radius: 10px;
-      border: 1px solid var(--border);
-      background: #0a1529;
-      color: var(--text);
-      outline: none;
-    }
-    input:focus { box-shadow: 0 0 0 3px var(--ring); border-color: transparent; }
-    button {
-      background: linear-gradient(135deg, var(--primary), var(--accent));
-      border: none;
-      cursor: pointer;
-      font-weight: 600;
-      transition: transform .05s ease, filter .2s ease;
-    }
-    button:hover { filter: brightness(1.07); }
-    button:active { transform: translateY(1px); }
-
-    .btn-ghost {
-      background: transparent;
-      border: 1px solid var(--border);
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 8px;
-      overflow: hidden;
-      border-radius: 12px;
-      border: 1px solid var(--border);
-    }
-    thead th {
-      background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
-      text-align: left;
-      padding: 10px;
-      font-weight: 600;
-      font-size: 13px;
-      border-bottom: 1px solid var(--border);
-    }
-    tbody td {
-      padding: 10px;
-      border-bottom: 1px solid var(--border);
-      font-size: 14px;
-    }
-    tbody tr:nth-child(odd) { background: rgba(255,255,255,.02); }
-
-    .chip {
-      display: inline-block;
-      padding: 4px 8px;
-      font-size: 12px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      background: rgba(124,58,237,.15);
-      color: var(--primary-2);
-    }
-    .chip.ok { background: rgba(16,185,129,.15); color: #6ee7b7; }
-    .chip.warn { background: rgba(245,158,11,.15); color: #fcd34d; }
-    .chip.danger { background: rgba(239,68,68,.15); color: #fca5a5; }
-
-    .toast {
-      position: fixed;
-      right: 16px;
-      bottom: 16px;
-      background: #0b1324;
-      border: 1px solid var(--border);
-      padding: 12px 14px;
-      border-radius: 12px;
-      box-shadow: var(--shadow);
-      display: none;
-    }
+    .links{margin-top:16px; color:var(--muted); font-size:14px}
+    .links a{color:#93c5fd}
   </style>
 </head>
 <body>
-  <div class="container">
-    <div class="hero">
+  <div class="wrap">
+    <div class="card">
       <h1>Affiliate Manager</h1>
-      <p>Local demo — links → clicks → conversions → commissions → payouts</p>
-    </div>
+      <p>Choose your portal</p>
 
-    <div class="grid" style="margin-top:16px">
-      <div class="card">
-        <h3>Create Affiliate</h3>
-        <form id="createForm" class="row" autocomplete="off">
-          <input id="affName" placeholder="Affiliate name (e.g., Dr. Avneesh)" required />
-          <input id="rateBps" placeholder="Rate bps (1000 = 10%)" type="number" min="0" max="10000" />
-          <button>Create</button>
-          <button type="button" id="refresh" class="btn-ghost">Refresh</button>
-        </form>
-        <div id="createResult" class="muted" style="margin-top:8px"></div>
+      <div class="grid">
+        <a class="button" href="/owner-login.html">👑 Owner Login</a>
+        <a class="button" href="/login.html">🛠 Admin Login</a>
+        <a class="button" href="/affiliate-login.html">🔗 Affiliate Login</a>
       </div>
 
-      <div class="card">
-        <h3>Request Payout</h3>
-        <form id="payForm" class="row">
-          <input id="payCode" placeholder="Affiliate code" required />
-          <input id="payAmount" type="number" placeholder="Amount ₹ (blank = MAX)" min="0" />
-          <button>Request</button>
-        </form>
-        <div id="payResult" class="muted" style="margin-top:8px"></div>
+      <div class="links">
+        <p>Need the older demo page you were using? Open <a href="/admin-demo.html">admin-demo.html</a> (optional).</p>
       </div>
-    </div>
-
-    <div class="card" style="margin-top:16px">
-      <h3>Stats</h3>
-      <div id="stats"></div>
-      <div class="muted">Available = Earned commissions − Approved/Paid payouts</div>
-    </div>
-
-    <div class="card" style="margin-top:16px">
-      <h3>Simulate Conversion (Webhook)</h3>
-      <form id="convForm" class="row">
-        <input id="convCode" placeholder="Affiliate code" required />
-        <input id="orderId" placeholder="Order ID" required />
-        <input id="amount" type="number" placeholder="Amount (₹)" min="0" />
-        <button>Record Conversion</button>
-      </form>
-      <div class="muted">In production, your checkout would POST to <code>/api/convert</code> with HMAC verification.</div>
     </div>
   </div>
-
-  <div id="toast" class="toast"></div>
-  <script src="dashboard.js"></script>
 </body>
 </html>
-

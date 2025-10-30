@@ -1,0 +1,75 @@
+<!doctype html><html><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Owner Dashboard</title>
+<style>
+body{margin:0;background:#0f172a;color:#e5e7eb;font-family:system-ui,Segoe UI,Roboto,Arial}
+.wrap{max-width:980px;margin:32px auto;padding:0 16px}
+.h{display:flex;justify-content:space-between;align-items:center}
+.card{background:#1f2937;border:1px solid rgba(255,255,255,.1);border-radius:14px;padding:16px;margin-top:14px}
+table{width:100%;border-collapse:collapse;margin-top:8px}
+th,td{border-bottom:1px solid rgba(255,255,255,.08);padding:8px;text-align:left}
+input,button{padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,.1);background:#0b1529;color:#e5e7eb}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+</style></head><body>
+<div class="wrap">
+  <div class="h">
+    <h1>Owner Dashboard</h1>
+    <button id="logout">Logout</button>
+  </div>
+
+  <div class="card" id="ov">Loading overview…</div>
+
+  <div class="card">
+    <h3>Create Admin</h3>
+    <div class="row">
+      <input id="auser" placeholder="username"/>
+      <input id="aname" placeholder="display name (optional)"/>
+      <input id="apass" placeholder="password"/>
+      <button id="mk">Create</button>
+    </div>
+    <div id="msg" style="margin-top:8px;color:#94a3b8"></div>
+  </div>
+
+  <div class="card">
+    <h3>Admins</h3>
+    <table id="tbl"><thead><tr>
+      <th>Username</th><th>Name</th><th>Created</th><th>Reset Password</th>
+    </tr></thead><tbody></tbody></table>
+  </div>
+</div>
+<script>
+async function j(u,o){const r=await fetch(u,{headers:{'Content-Type':'application/json'},...o}); if(!r.ok) throw new Error(await r.text()); return r.json();}
+async function load(){
+  const ov = await j('/api/owner/overview');
+  document.getElementById('ov').textContent = `Total Admins: ${ov.totalAdmins} • Total Affiliates: ${ov.totalAffiliates}`;
+  const rows = await j('/api/owner/admins');
+  const tb = document.querySelector('#tbl tbody'); tb.innerHTML='';
+  rows.forEach(r=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML = `<td>${r.username}</td><td>${r.name||''}</td><td>${r.created_at}</td>
+      <td><button data-id="${r.id}">Set New Password</button></td>`;
+    tb.appendChild(tr);
+  });
+  tb.querySelectorAll('button').forEach(b=>{
+    b.onclick = async () => {
+      const np = prompt('Enter new password for admin');
+      if (!np) return;
+      try{ await j('/api/owner/admins/'+b.dataset.id+'/reset-password',{method:'POST',body:JSON.stringify({password:np})});
+           alert('Password reset'); }catch(e){ alert('Error: '+e.message); }
+    };
+  });
+}
+document.getElementById('mk').onclick = async ()=>{
+  const username=document.getElementById('auser').value.trim();
+  const name=document.getElementById('aname').value.trim();
+  const password=document.getElementById('apass').value;
+  try{ await j('/api/owner/admins',{method:'POST',body:JSON.stringify({username,name,password})});
+       document.getElementById('msg').textContent='Admin created';
+       ['auser','aname','apass'].forEach(id=>document.getElementById(id).value='');
+       await load();
+  }catch(e){ document.getElementById('msg').textContent='Error: '+e.message; }
+};
+document.getElementById('logout').onclick=()=>{ fetch('/api/owner/logout',{method:'POST'}).then(()=>location.href='/'); };
+load();
+</script>
+</body></html>
